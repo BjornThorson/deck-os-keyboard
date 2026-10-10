@@ -18,7 +18,7 @@ class DeckKeyboardService : InputMethodService() {
  private val accent=Color.rgb(201,112,171)
 
  override fun onCreateInputView(): View {
-  root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(background); setPadding(4,6,4,6) }
+  root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(this@DeckKeyboardService.background); setPadding(4,6,4,6) }
   drawKeys()
   return root
  }
