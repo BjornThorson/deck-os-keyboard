@@ -19,6 +19,8 @@ class DeckKeyboardService : InputMethodService() {
  private var panel="ABC"
  private var lastShift=0L
  private var lastSpace=0L
+ private var lastCorrectionOriginal:String?=null
+ private var lastCorrectionResult:String?=null
  private var repeatKey:String?=null
  private val handler=Handler(Looper.getMainLooper())
  private lateinit var root:LinearLayout
@@ -53,6 +55,13 @@ class DeckKeyboardService : InputMethodService() {
  private fun uppercaseActive()=caps || shift || (panel=="ABC" && prefs.getBoolean("autocap",true) && autoCapital())
  override fun onCreateInputView():View {
   root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg); setPadding(2,4,2,0) }
+  root.setOnApplyWindowInsetsListener { _,insets ->
+   val bottom=insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
+   val safe=kotlin.math.max(bottom,48.dp)
+   if(root.paddingBottom!=safe) root.setPadding(root.paddingLeft,root.paddingTop,root.paddingRight,safe)
+   insets
+  }
+  root.setPadding(root.paddingLeft,root.paddingTop,root.paddingRight,48.dp)
   drawKeys()
   return root
  }
@@ -128,6 +137,8 @@ class DeckKeyboardService : InputMethodService() {
    "FN" -> { row(listOf("F1","F2","F3","F4"));row(listOf("F5","F6","F7","F8"));row(listOf("F9","F10","F11","F12"));row(listOf("ABC","Ctrl","Alt","Space","Esc"),listOf(1f,1f,1f,4f,1f)) }
    "NUM" -> { row(listOf("7","8","9","/"));row(listOf("4","5","6","*"));row(listOf("1","2","3","-"));row(listOf("ABC","0",".","+","Enter")) }
   }
+  // The bottom inset above reserves space for Android's keyboard switcher.
+  // User clearance adds only optional extra breathing room.
   val clearance=prefs.getInt("clearance",12)
   root.addView(View(this),LinearLayout.LayoutParams(-1,clearance.dp))
  }
@@ -155,13 +166,22 @@ class DeckKeyboardService : InputMethodService() {
   val old=currentWord()
   ic.beginBatchEdit()
   ic.deleteSurroundingText(old.length,0)
-  ic.commitText(if(old.firstOrNull()?.isUpperCase()==true) word.replaceFirstChar{it.uppercase()} else word,1)
+  val replacement=if(old.firstOrNull()?.isUpperCase()==true || word=="i" || word=="i'm" || word=="i'll" || word=="i've") word.replaceFirstChar{it.uppercase()} else word
+  ic.commitText(replacement+" ",1)
+  lastCorrectionOriginal=null;lastCorrectionResult=null
   ic.endBatchEdit()
   updateSuggestions()
  }
  private fun erase() {
   val ic=currentInputConnection ?:return
-  if(ic.getSelectedText(0)!=null) ic.commitText("",1) else ic.deleteSurroundingText(1,0)
+  val before=beforeCursor()
+  val result=lastCorrectionResult
+  val original=lastCorrectionOriginal
+  if(result!=null && original!=null && before.endsWith(result+" ")) {
+   ic.deleteSurroundingText(result.length+1,0)
+   ic.commitText(original,1)
+  } else if(ic.getSelectedText(0)!=null) ic.commitText("",1) else ic.deleteSurroundingText(1,0)
+  lastCorrectionOriginal=null;lastCorrectionResult=null
   updateSuggestions()
  }
  private fun press(key:String) {
@@ -190,7 +210,23 @@ class DeckKeyboardService : InputMethodService() {
   else if(key=="Space") {
    val before=beforeCursor()
    val old=currentWord()
-   if(predictionsEnabled && prefs.getBoolean("autocorrect",true) && commonTypos.containsKey(old.lowercase(Locale.ENGLISH))) replaceWord(commonTypos.getValue(old.lowercase(Locale.ENGLISH)))
+   val correction=if(!privateField && !terminalField && prefs.getBoolean("autocorrect",true))
+    when(old.lowercase(Locale.ENGLISH)) {
+     "i" -> "I"
+     "im" -> "I'm"
+     "ive" -> "I've"
+     "ill" -> "I'll"
+     else -> commonTypos[old.lowercase(Locale.ENGLISH)]
+    } else null
+   if(correction!=null && old.isNotEmpty()) {
+    val corrected=if(old.first().isUpperCase()) correction.replaceFirstChar{it.uppercase()} else correction
+    ic.deleteSurroundingText(old.length,0)
+    ic.commitText(corrected,1)
+    lastCorrectionOriginal=old
+    lastCorrectionResult=corrected
+   } else {
+    lastCorrectionOriginal=null;lastCorrectionResult=null
+   }
    val now=android.os.SystemClock.uptimeMillis()
    if(prefs.getBoolean("double_space",true) && now-lastSpace<350 && beforeCursor().endsWith(" ")) {
     ic.deleteSurroundingText(1,0);ic.commitText(". ",1)
@@ -205,6 +241,7 @@ class DeckKeyboardService : InputMethodService() {
     if(k!=KeyEvent.KEYCODE_UNKNOWN) sendCode(k,meta) else ic.commitText(char,1)
    } else ic.commitText(char,1)
    lastSpace=0L
+   lastCorrectionOriginal=null;lastCorrectionResult=null
   }
   shift=false;ctrl=false;alt=false
   drawKeys()
