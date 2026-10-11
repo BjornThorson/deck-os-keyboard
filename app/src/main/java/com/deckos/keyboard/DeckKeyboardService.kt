@@ -300,9 +300,11 @@ class DeckKeyboardService : InputMethodService() {
  }
  private fun correctionFor(original:String):String? {
   val typed=original.lowercase(Locale.ENGLISH)
-  if(typed.isEmpty())return null
+  if(typed.isEmpty() || prefs.getString("correction_strength","moderate")=="off")return null
   val explicit=when(typed) {
    "i"->"I";"im"->"I'm";"ive"->"I've";"ill"->"I'll"
+   // High-confidence, adjacent-key slips in extremely common two-letter words.
+   "ig"->"it";"kf"->"of"
    else->commonTypos[typed]
   }
   if(explicit!=null)return explicit
