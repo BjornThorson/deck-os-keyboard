@@ -27,6 +27,9 @@ class DeckKeyboardService : InputMethodService() {
  private val keyBg=Color.rgb(49,47,57)
  private val accent=Color.rgb(185,99,155)
  private val words=listOf("the","to","and","a","of","you","it","is","in","that","for","on","with","this","have","be","are","was","not","but","we","they","can","will","would","should","could","hello","help","how","what","when","where","why","who","there","their","then","than","your","you're","yes","please","thanks","thank","good","great","morning","night","today","tomorrow","later","time","typing","type","text","keyboard","phone","message","people","really","right","wrong","about","after","before","because","between","something","someone","somewhere","anything","everything","nothing","going","doing","being","having","working","work","make","made","want","wanted","need","needed","like","liked","love","look","looking","think","thinking","know","knowing","don't","can't","won't","it's","i'm","i'll","i've","we're","they're","that's","there's","does","did","done","more","most","much","many","some","just","very","little","big","small","first","last","next","new","old","now","here","there","okay","ok","sure","fine","nice","better","best","again","still","also","only","other","another","every","each","all","any","my","me","our","us","he","she","his","her","them","him","from","into","over","under","up","down","left","right","back","space","word","words","sentence","sentences","automatic","capital","capitalisation","prediction","predictive","suggestion","suggestions","correct","correction","autocorrect","android","pixel","deck","terminal","code","project","build","version","test","testing","problem","problems","feature","features","change","changes","update","updates","github","vercel")
+ private val dictionary:List<String> by lazy {
+  assets.open("english_frequency.txt").bufferedReader().use { it.readLines() }
+ }
  private val commonTypos=mapOf("teh" to "the","adn" to "and","thier" to "their","recieve" to "receive","dont" to "don't","cant" to "can't","im" to "I'm","ive" to "I've","ill" to "I'll","youre" to "you're","woudl" to "would","becuase" to "because")
  private val prefs get()=getSharedPreferences("keyboard",MODE_PRIVATE)
  private val privateField get():Boolean {
@@ -43,6 +46,11 @@ class DeckKeyboardService : InputMethodService() {
   super.onStartInput(attribute,restarting)
   shift=false; caps=false; ctrl=false; alt=false
  }
+ private fun autoCapital():Boolean {
+  val before=beforeCursor()
+  return before.trimEnd().isEmpty() || Regex("[.!?]\\s+$").containsMatchIn(before)
+ }
+ private fun uppercaseActive()=caps || shift || (panel=="ABC" && prefs.getBoolean("autocap",true) && autoCapital())
  override fun onCreateInputView():View {
   root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg); setPadding(2,4,2,0) }
   drawKeys()
@@ -55,11 +63,15 @@ class DeckKeyboardService : InputMethodService() {
   val height=if(landscape) 42 else when(prefs.getString("height","standard")) {"compact"->47;"tall"->65;else->56}
   keys.forEachIndexed { index,key ->
    val button=Button(this).apply {
-    text=when(key) {"Space"->"English";"Shift"->if(caps)"⇪" else "⇧";else->key}
+    text=when(key) {
+     "Space"->"English"
+     "Shift"->if(caps)"⇪" else "⇧"
+     else->if(panel=="ABC" && key.length==1 && key[0] in 'a'..'z' && uppercaseActive()) key.uppercase(Locale.ENGLISH) else key
+    }
     textSize=if(key.length>4) 11f else 17f
     setAllCaps(false)
     setTextColor(Color.WHITE)
-    setBackgroundTintList(android.content.res.ColorStateList.valueOf(if((key=="Ctrl"&&ctrl)||(key=="Alt"&&alt)||(key=="Shift"&&(shift||caps))||key==panel) accent else keyBg))
+    setBackgroundTintList(android.content.res.ColorStateList.valueOf(if((key=="Ctrl"&&ctrl)||(key=="Alt"&&alt)||(key=="Shift"&&uppercaseActive())||key==panel) accent else keyBg))
     minWidth=0; minimumWidth=0; minHeight=0; minimumHeight=0
     setPadding(0,0,0,0)
     setOnClickListener { if(key!="⌫" && key!="Space") press(key) }
@@ -74,7 +86,7 @@ class DeckKeyboardService : InputMethodService() {
         MotionEvent.ACTION_DOWN -> { startX=event.x; moved=0; holding=false; handler.postDelayed(hold,380); return true }
         MotionEvent.ACTION_MOVE -> {
          if(key=="Space" && holding) {
-          val delta=((event.x-startX)/18.dp).toInt()
+          val delta=((event.x-startX)/9.dp).toInt()
           val diff=delta-moved
           if(diff!=0) { repeat(kotlin.math.abs(diff)) { sendCode(if(diff>0)KeyEvent.KEYCODE_DPAD_RIGHT else KeyEvent.KEYCODE_DPAD_LEFT) }; moved=delta }
          }
@@ -108,8 +120,8 @@ class DeckKeyboardService : InputMethodService() {
    "ABC" -> {
     row("qwertyuiop".map{it.toString()})
     row("asdfghjkl".map{it.toString()})
-    row(listOf("Shift")+ "zxcvbnm".map{it.toString()} + "⌫")
-    row(listOf("123",",","Ctrl","Space",".","Enter"),listOf(1f,0.8f,1.2f,4.4f,0.8f,1.2f))
+    row(listOf("Shift")+ "zxcvbnm".map{it.toString()} + listOf(".","⌫"))
+    row(listOf("123",",","Ctrl","Space","Enter"),listOf(1f,0.8f,1.2f,4.4f,1.2f))
    }
    "SYM" -> { row(listOf("1","2","3","4","5","6","7","8","9","0"));row(listOf("!","@","#","$","%","^","&","*","(",")"));row(listOf("-","_","=","+","[","]","{","}","⌫"));row(listOf("ABC","/","\\","Space","?","Enter"),listOf(1f,1f,1f,4f,1f,1f)) }
    "NAV" -> { row(listOf("Home","↑","End","PgUp"));row(listOf("←","↓","→","PgDn"));row(listOf("Ins","Del","Tab","Esc"));row(listOf("ABC","Ctrl","Alt","Space","Enter"),listOf(1f,1f,1f,4f,1f)) }
@@ -126,7 +138,8 @@ class DeckKeyboardService : InputMethodService() {
   suggestions.removeAllViews()
   val current=currentWord().lowercase(Locale.ENGLISH)
   val candidates=if(predictionsEnabled && panel=="ABC" && current.isNotEmpty()) {
-   (listOfNotNull(commonTypos[current])+words.filter{it.startsWith(current) && it!=current}).distinct().take(3)
+   (listOfNotNull(commonTypos[current]) + dictionary.asSequence().filter{it.startsWith(current) && it!=current}.take(6).toList() +
+    words.filter{it.startsWith(current) && it!=current}).distinct().take(3)
   } else emptyList()
   for(i in 0..2) {
    val candidate=candidates.getOrNull(i).orEmpty()
@@ -185,7 +198,7 @@ class DeckKeyboardService : InputMethodService() {
    lastSpace=now
   } else if(key.length==1) {
    val before=beforeCursor()
-   val autoCap=before.trimEnd().isEmpty() || Regex("[.!?]\\s+$").containsMatchIn(before)
+   val autoCap=autoCapital()
    val char=if(shift||caps||(prefs.getBoolean("autocap",true)&&autoCap)) key.uppercase(Locale.ENGLISH) else key
    if(ctrl||alt) {
     val k=KeyEvent.keyCodeFromString("KEYCODE_"+key.uppercase(Locale.ENGLISH))
