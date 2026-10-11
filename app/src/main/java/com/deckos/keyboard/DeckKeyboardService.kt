@@ -88,7 +88,10 @@ class DeckKeyboardService : InputMethodService() {
    override fun dispatchTouchEvent(event:MotionEvent):Boolean {
     if(childCount==0)return super.dispatchTouchEvent(event)
     if(event.actionMasked==MotionEvent.ACTION_DOWN) {
-     active=(0 until childCount).map{getChildAt(it)}.minByOrNull{ kotlin.math.abs(event.x-(it.left+it.right)/2f) }
+     active=(0 until childCount).map{getChildAt(it)}.firstOrNull { event.x >= it.left && event.x < it.right }
+      ?: (0 until childCount).map{getChildAt(it)}.minByOrNull {
+       when { event.x < it.left -> it.left-event.x; event.x > it.right -> event.x-it.right; else -> 0f }
+      }
     }
     val target=active
     if(target!=null) {
@@ -141,10 +144,10 @@ class DeckKeyboardService : InputMethodService() {
         }
         MotionEvent.ACTION_UP -> {
          handler.removeCallbacks(hold);v.isPressed=false
-         if(opened) {popup?.dismiss();popup=null;press(extras[chosen])} else press(key)
+         if(opened) {updateSuggestions();press(extras[chosen])} else press(key)
          return true
         }
-        MotionEvent.ACTION_CANCEL -> {handler.removeCallbacks(hold);popup?.dismiss();popup=null;v.isPressed=false;return true}
+        MotionEvent.ACTION_CANCEL -> {handler.removeCallbacks(hold);if(opened)updateSuggestions();v.isPressed=false;return true}
        }
        return true
       }
@@ -185,34 +188,29 @@ class DeckKeyboardService : InputMethodService() {
   root.addView(line)
  }
  private fun showChoices(service:DeckKeyboardService,button:View,options:List<String>) {
-  popup?.dismiss()
-  val screenWidth=resources.displayMetrics.widthPixels
-  val cell=(screenWidth/options.size).coerceAtMost(48.dp).coerceAtLeast(24.dp)
-  val width=cell*options.size
-  val loc=IntArray(2)
-  button.getLocationOnScreen(loc)
-  popupLeft=(loc[0]+button.width/2-width/2).coerceIn(0,(screenWidth-width).coerceAtLeast(0))
-  popupCellWidth=cell
-  val bar=LinearLayout(service).apply {
-   orientation=LinearLayout.HORIZONTAL
-   setBackgroundColor(bg)
-  }
+  // Render inside the IME window: external popups above the keyboard can be clipped by Android.
+  if(!::suggestions.isInitialized)return
+  suggestions.removeAllViews()
+  val location=IntArray(2)
+  suggestions.getLocationOnScreen(location)
+  popupLeft=location[0]
+  popupCellWidth=(suggestions.width/options.size).coerceAtLeast(1)
   options.forEachIndexed { i,value ->
-   bar.addView(TextView(service).apply {
-    text=value;gravity=Gravity.CENTER;textSize=19f;setTextColor(Color.WHITE)
+   suggestions.addView(TextView(service).apply {
+    text=value
+    gravity=Gravity.CENTER
+    textSize=20f
+    setTextColor(Color.WHITE)
     setBackgroundColor(if(i==0)accent else keyBg)
-   },LinearLayout.LayoutParams(cell,48.dp))
-  }
-  popup=PopupWindow(bar,width,48.dp,false).apply {
-   isClippingEnabled=false
-   showAtLocation(root,Gravity.TOP or Gravity.LEFT,popupLeft,(loc[1]-54.dp).coerceAtLeast(0))
+   },LinearLayout.LayoutParams(0,-1,1f))
   }
  }
  private fun updateChoice(options:List<String>,index:Int) {
-  val bar=popup?.contentView as? LinearLayout ?:return
-  for(i in 0 until bar.childCount) bar.getChildAt(i).setBackgroundColor(if(i==index)accent else keyBg)
+  if(!::suggestions.isInitialized)return
+  for(i in 0 until suggestions.childCount) {
+   suggestions.getChildAt(i).setBackgroundColor(if(i==index)accent else keyBg)
+  }
  }
- private val repeater=object:Runnable { override fun run() { if(repeatKey=="⌫") { erase(); handler.postDelayed(this,65) } } }
  private fun drawKeys() {
   if(!::root.isInitialized)return
   root.removeAllViews()
