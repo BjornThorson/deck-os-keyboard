@@ -89,7 +89,7 @@ class DeckKeyboardService : InputMethodService() {
     val target=active
     if(target!=null) {
      val shifted=MotionEvent.obtain(event)
-     shifted.offsetLocation(-target.left,-target.top)
+     shifted.offsetLocation(-target.left.toFloat(),-target.top.toFloat())
      val handled=target.dispatchTouchEvent(shifted)
      shifted.recycle()
      if(event.actionMasked==MotionEvent.ACTION_UP || event.actionMasked==MotionEvent.ACTION_CANCEL) active=null
@@ -115,7 +115,7 @@ class DeckKeyboardService : InputMethodService() {
     setPadding(0,0,0,0)
     setOnClickListener { if(key!="⌫" && key!="Space") press(key) }
     val extras=when {
-     panel=="ABC" && key.length==1 && key[0] in 'q'..'p' && "qwertyuiop".contains(key) ->
+     panel=="ABC" && key.length==1 && "qwertyuiop".contains(key) ->
       listOf(("qwertyuiop".indexOf(key)+1)%10).map{if(it==0)"0" else it.toString()} + accents[key].orEmpty()
      key=="." -> listOf(",","!","?","…")
      panel=="ABC" -> accents[key].orEmpty()
