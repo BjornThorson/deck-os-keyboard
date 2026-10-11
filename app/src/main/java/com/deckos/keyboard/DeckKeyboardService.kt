@@ -280,14 +280,14 @@ class DeckKeyboardService : InputMethodService() {
  private fun press(key:String) {
   if(prefs.getBoolean("haptics",false)) root.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
   when(key) {
-   "ABC","SYM","NAV","FN","NUM" -> { panel=key;drawKeys();return }
-   "123" -> { panel="SYM";drawKeys();return }
-   "Ctrl" -> { ctrl=!ctrl;drawKeys();return }
-   "Alt" -> { alt=!alt;drawKeys();return }
+   "ABC","SYM","NAV","FN","NUM" -> { panel=key;root.post { drawKeys() };return }
+   "123" -> { panel="SYM";root.post { drawKeys() };return }
+   "Ctrl" -> { ctrl=!ctrl;root.post { drawKeys() };return }
+   "Alt" -> { alt=!alt;root.post { drawKeys() };return }
    "Shift" -> {
     val now=android.os.SystemClock.uptimeMillis()
     if(now-lastShift<350) {caps=!caps;shift=caps} else shift=!shift
-    lastShift=now;drawKeys();return
+    lastShift=now;root.post { drawKeys() };return
    }
   }
   val ic=currentInputConnection ?:return
