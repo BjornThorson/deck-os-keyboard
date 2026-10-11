@@ -18,6 +18,7 @@ class DeckKeyboardService : InputMethodService() {
  private var alt=false
  private var panel="ABC"
  private var lastShift=0L
+ private var lastTypedAt=0L
  private var lastSpace=0L
  private var lastCorrectionOriginal:String?=null
  private var lastCorrectionResult:String?=null
@@ -280,26 +281,22 @@ class DeckKeyboardService : InputMethodService() {
   val offsets=listOf(0f,0.5f,1.5f)
   return kotlin.math.abs((ax+offsets[ay])-(bx+offsets[by]))<=1.15f && kotlin.math.abs(ay-by)<=1
  }
- // Single typo only: substitution, insertion, deletion, or adjacent transposition.
- // Returns a lower score for physically adjacent substitutions.
+ // Weighted edit distance: neighbouring keys and adjacent swaps cost less.
+ // Two mistakes are allowed, but confidence thresholds remain conservative.
  private fun typoCost(typed:String,target:String):Int {
-  if(kotlin.math.abs(typed.length-target.length)>1)return 99
-  if(typed.length==target.length) {
-   val wrong=typed.indices.filter{typed[it]!=target[it]}
-   if(wrong.size==1)return if(nearby(typed[wrong[0]],target[wrong[0]]))1 else 3
-   if(wrong.size==2 && wrong[1]==wrong[0]+1 &&
-      typed[wrong[0]]==target[wrong[1]] && typed[wrong[1]]==target[wrong[0]])return 1
-   return 99
+  if(kotlin.math.abs(typed.length-target.length)>2)return 99
+  val n=typed.length;val m=target.length
+  val d=Array(n+1){IntArray(m+1)}
+  for(i in 0..n)d[i][0]=i*2
+  for(j in 0..m)d[0][j]=j*2
+  for(i in 1..n)for(j in 1..m) {
+   val sub=if(typed[i-1]==target[j-1])0 else if(nearby(typed[i-1],target[j-1]))1 else 3
+   var cost=minOf(d[i-1][j]+2,d[i][j-1]+2,d[i-1][j-1]+sub)
+   if(i>1 && j>1 && typed[i-1]==target[j-2] && typed[i-2]==target[j-1])
+    cost=minOf(cost,d[i-2][j-2]+1)
+   d[i][j]=cost
   }
-  val shorter=if(typed.length<target.length)typed else target
-  val longer=if(typed.length>target.length)typed else target
-  var i=0;var j=0;var skipped=false
-  while(i<shorter.length && j<longer.length) {
-   if(shorter[i]==longer[j]) {i++;j++}
-   else if(!skipped) {skipped=true;j++}
-   else return 99
-  }
-  return 2
+  return d[n][m]
  }
  private fun correctionFor(original:String):String? {
   val typed=original.lowercase(Locale.ENGLISH)
@@ -313,15 +310,15 @@ class DeckKeyboardService : InputMethodService() {
   if(strength=="off" || typed.length<3 || typed.length>18 || !typed.all{it in 'a'..'z'})return null
   // Never rewrite an accepted dictionary word solely on spelling similarity.
   if(typed in dictionary || typed in words)return null
-  val limit=when(strength) {"gentle"->1;"strong"->3;else->2}
+  val limit=when(strength) {"gentle"->2;"strong"->5;else->4}
   var best:String?=null
   var bestScore=Int.MAX_VALUE
   // The dictionary is ordered by frequency. Rank by typo plausibility first,
   // then frequency; no sorting or view rebuilding on the typing hot path.
   dictionary.forEachIndexed { index,word ->
-   if(word.length in (typed.length-1)..(typed.length+1) && word.all{it in 'a'..'z'}) {
+   if(word.length in (typed.length-2)..(typed.length+2) && word.all{it in 'a'..'z'}) {
     val cost=typoCost(typed,word)
-    if(cost<=3) {
+    if(cost<=limit) {
      val score=cost*100+index/150
      if(score<bestScore) {bestScore=score;best=word}
     }
@@ -361,10 +358,33 @@ class DeckKeyboardService : InputMethodService() {
   lastCorrectionOriginal=null;lastCorrectionResult=null
   updateSuggestions()
  }
+ private fun correctCurrentWord() {
+  val ic=currentInputConnection ?:return
+  val old=currentWord()
+  val correction=if(!privateField && !terminalField && prefs.getBoolean("autocorrect",true))
+   correctionFor(old) else null
+  if(correction!=null && old.isNotEmpty()) {
+   val corrected=if(old.first().isUpperCase()) correction.replaceFirstChar{it.uppercase()} else correction
+   if(corrected!=old) {
+    ic.deleteSurroundingText(old.length,0)
+    ic.commitText(corrected,1)
+    lastCorrectionOriginal=old
+    lastCorrectionResult=corrected
+    return
+   }
+  }
+  lastCorrectionOriginal=null;lastCorrectionResult=null
+ }
  private fun press(key:String) {
   if(prefs.getBoolean("haptics",false)) root.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
   when(key) {
-   "ABC","SYM","NAV","FN","NUM" -> { panel=key;root.post { drawKeys() };return }
+   "ABC","SYM","NAV","FN","NUM" -> {
+    val elapsed=android.os.SystemClock.uptimeMillis()-lastTypedAt
+    if(elapsed<220L) {
+     handler.postDelayed({ if(::root.isInitialized) {panel=key;drawKeys()} },220L-elapsed)
+    } else {panel=key;root.post {drawKeys()} }
+    return
+   }
    "123" -> { panel="SYM";root.post { drawKeys() };return }
    "Ctrl" -> { ctrl=!ctrl;root.post { drawKeys() };return }
    "Alt" -> { alt=!alt;root.post { drawKeys() };return }
@@ -386,18 +406,7 @@ class DeckKeyboardService : InputMethodService() {
   if(code!=null) sendCode(code,meta)
   else if(key=="Space") {
    val before=beforeCursor()
-   val old=currentWord()
-   val correction=if(!privateField && !terminalField && prefs.getBoolean("autocorrect",true))
-    correctionFor(old) else null
-   if(correction!=null && old.isNotEmpty()) {
-    val corrected=if(old.first().isUpperCase()) correction.replaceFirstChar{it.uppercase()} else correction
-    ic.deleteSurroundingText(old.length,0)
-    ic.commitText(corrected,1)
-    lastCorrectionOriginal=old
-    lastCorrectionResult=corrected
-   } else {
-    lastCorrectionOriginal=null;lastCorrectionResult=null
-   }
+   correctCurrentWord()
    val now=android.os.SystemClock.uptimeMillis()
    if(prefs.getBoolean("double_space",true) && now-lastSpace<350 && beforeCursor().endsWith(" ")) {
     ic.deleteSurroundingText(1,0);ic.commitText(". ",1)
@@ -405,6 +414,7 @@ class DeckKeyboardService : InputMethodService() {
    lastSpace=now
   } else if(key.length==1 || key=="…") {
    if(key in listOf(".",",","!","?","…") && beforeCursor().endsWith(" ")) ic.deleteSurroundingText(1,0)
+   if(key in listOf(".","!","?"))correctCurrentWord()
    val before=beforeCursor()
    val autoCap=autoCapital()
    val char=if(shift||caps||(prefs.getBoolean("autocap",true)&&autoCap)) key.uppercase(Locale.ENGLISH) else key
@@ -413,8 +423,9 @@ class DeckKeyboardService : InputMethodService() {
     if(k!=KeyEvent.KEYCODE_UNKNOWN) sendCode(k,meta) else ic.commitText(char,1)
    } else ic.commitText(char,1)
    lastSpace=0L
-   lastCorrectionOriginal=null;lastCorrectionResult=null
+   if(key !in listOf(".","!","?")) {lastCorrectionOriginal=null;lastCorrectionResult=null}
   }
+  if(key.length==1 || key=="Space" || key=="⌫" || key=="…")lastTypedAt=android.os.SystemClock.uptimeMillis()
   shift=false;ctrl=false;alt=false
   if(key in listOf("ABC","SYM","NAV","FN","NUM","Shift","Ctrl","Alt")) {
    root.post { drawKeys() }
