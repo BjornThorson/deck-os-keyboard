@@ -33,6 +33,8 @@ class DeckKeyboardService : InputMethodService() {
   "z" to listOf("ž"),"d" to listOf("ð"),"t" to listOf("þ")
  )
  private var popup:PopupWindow?=null
+ private val letterButtons=mutableListOf<Pair<String,Button>>()
+ private var shiftButton:Button?=null
  private val handler=Handler(Looper.getMainLooper())
  private lateinit var root:LinearLayout
  private lateinit var suggestions:LinearLayout
@@ -69,11 +71,11 @@ class DeckKeyboardService : InputMethodService() {
   root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg); setPadding(2,4,2,0) }
   root.setOnApplyWindowInsetsListener { _,insets ->
    val bottom=insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
-   val safe=kotlin.math.max(bottom,30.dp)
+   val safe=bottom.coerceAtMost(24.dp).coerceAtLeast(8.dp)
    if(root.paddingBottom!=safe) root.setPadding(root.paddingLeft,root.paddingTop,root.paddingRight,safe)
    insets
   }
-  root.setPadding(root.paddingLeft,root.paddingTop,root.paddingRight,30.dp)
+  root.setPadding(root.paddingLeft,root.paddingTop,root.paddingRight,8.dp)
   drawKeys()
   return root
  }
@@ -173,6 +175,8 @@ class DeckKeyboardService : InputMethodService() {
      })
     }
    }
+   if(panel=="ABC" && key.length==1 && key[0] in 'a'..'z') letterButtons.add(key to button)
+   if(panel=="ABC" && key=="Shift") shiftButton=button
    line.addView(button,LinearLayout.LayoutParams(0,height.dp,weights?.get(index) ?: 1f).apply { setMargins(1.dp,1.dp,1.dp,1.dp) })
   }
   root.addView(line)
@@ -199,6 +203,7 @@ class DeckKeyboardService : InputMethodService() {
  private fun drawKeys() {
   if(!::root.isInitialized)return
   root.removeAllViews()
+  letterButtons.clear();shiftButton=null
   suggestions=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
   root.addView(suggestions,LinearLayout.LayoutParams(-1,42.dp))
   updateSuggestions()
@@ -218,7 +223,7 @@ class DeckKeyboardService : InputMethodService() {
   }
   // The bottom inset above reserves space for Android's keyboard switcher.
   // User clearance adds only optional extra breathing room.
-  val clearance=kotlin.math.max(0,prefs.getInt("clearance",12)-6)
+  val clearance=0
   root.addView(View(this),LinearLayout.LayoutParams(-1,clearance.dp))
  }
  private fun beforeCursor()=currentInputConnection?.getTextBeforeCursor(100,0)?.toString().orEmpty()
@@ -249,6 +254,15 @@ class DeckKeyboardService : InputMethodService() {
   ic.commitText(replacement+" ",1)
   lastCorrectionOriginal=null;lastCorrectionResult=null
   ic.endBatchEdit()
+  updateSuggestions()
+ }
+ private fun refreshTypingUi() {
+  if(!::root.isInitialized || !::suggestions.isInitialized) return
+  if(panel=="ABC") {
+   val upper=uppercaseActive()
+   letterButtons.forEach { (letter,button) -> button.text=if(upper)letter.uppercase(Locale.ENGLISH) else letter }
+   shiftButton?.backgroundTintList=android.content.res.ColorStateList.valueOf(if(upper)accent else keyBg)
+  }
   updateSuggestions()
  }
  private fun erase() {
@@ -324,7 +338,9 @@ class DeckKeyboardService : InputMethodService() {
    lastCorrectionOriginal=null;lastCorrectionResult=null
   }
   shift=false;ctrl=false;alt=false
-  drawKeys()
+  if(key in listOf("ABC","SYM","NAV","FN","NUM","Shift","Ctrl","Alt")) {
+   root.post { drawKeys() }
+  } else refreshTypingUi()
  }
  private fun sendCode(code:Int,meta:Int=0) {
   val ic=currentInputConnection?:return
