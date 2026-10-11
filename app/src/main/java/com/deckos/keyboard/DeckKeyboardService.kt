@@ -22,6 +22,17 @@ class DeckKeyboardService : InputMethodService() {
  private var lastCorrectionOriginal:String?=null
  private var lastCorrectionResult:String?=null
  private var repeatKey:String?=null
+ private val accents=mapOf(
+  "a" to listOf("á","à","â","ä","ã","å","æ"),
+  "e" to listOf("é","è","ê","ë","ē"),
+  "i" to listOf("í","ì","î","ï","ī"),
+  "o" to listOf("ó","ò","ô","ö","õ","ø"),
+  "u" to listOf("ú","ù","û","ü","ū"),
+  "y" to listOf("ý","ÿ"),
+  "c" to listOf("ç"),"n" to listOf("ñ"),"s" to listOf("ß","š"),
+  "z" to listOf("ž"),"d" to listOf("ð"),"t" to listOf("þ")
+ )
+ private var popup:PopupWindow?=null
  private val handler=Handler(Looper.getMainLooper())
  private lateinit var root:LinearLayout
  private lateinit var suggestions:LinearLayout
@@ -46,7 +57,8 @@ class DeckKeyboardService : InputMethodService() {
  private val predictionsEnabled get()=!privateField && !terminalField && prefs.getBoolean("suggestions",true)
  override fun onStartInput(attribute:EditorInfo?, restarting:Boolean) {
   super.onStartInput(attribute,restarting)
-  shift=false; caps=false; ctrl=false; alt=false
+  shift=false; caps=false; ctrl=false; alt=false; panel="ABC"
+  if(::root.isInitialized) drawKeys()
  }
  private fun autoCapital():Boolean {
   val before=beforeCursor()
@@ -57,19 +69,37 @@ class DeckKeyboardService : InputMethodService() {
   root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg); setPadding(2,4,2,0) }
   root.setOnApplyWindowInsetsListener { _,insets ->
    val bottom=insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
-   val safe=kotlin.math.max(bottom,48.dp)
+   val safe=kotlin.math.max(bottom,30.dp)
    if(root.paddingBottom!=safe) root.setPadding(root.paddingLeft,root.paddingTop,root.paddingRight,safe)
    insets
   }
-  root.setPadding(root.paddingLeft,root.paddingTop,root.paddingRight,48.dp)
+  root.setPadding(root.paddingLeft,root.paddingTop,root.paddingRight,30.dp)
   drawKeys()
   return root
  }
  private val Int.dp get()=(this*resources.displayMetrics.density).toInt()
  private fun row(keys:List<String>,weights:List<Float>?=null) {
-  val line=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+  val line=object:LinearLayout(this) {
+   private var active:View?=null
+   override fun dispatchTouchEvent(event:MotionEvent):Boolean {
+    if(childCount==0)return super.dispatchTouchEvent(event)
+    if(event.actionMasked==MotionEvent.ACTION_DOWN) {
+     active=(0 until childCount).map{getChildAt(it)}.minByOrNull{ kotlin.math.abs(event.x-(it.left+it.right)/2f) }
+    }
+    val target=active
+    if(target!=null) {
+     val shifted=MotionEvent.obtain(event)
+     shifted.offsetLocation(-target.left,-target.top)
+     val handled=target.dispatchTouchEvent(shifted)
+     shifted.recycle()
+     if(event.actionMasked==MotionEvent.ACTION_UP || event.actionMasked==MotionEvent.ACTION_CANCEL) active=null
+     return handled
+    }
+    return super.dispatchTouchEvent(event)
+   }
+  }.apply { orientation=LinearLayout.HORIZONTAL }
   val landscape=resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE
-  val height=if(landscape) 42 else when(prefs.getString("height","standard")) {"compact"->47;"tall"->65;else->56}
+  val height=if(keys==listOf("ABC","SYM","NAV","FN","NUM")) 36 else if(landscape) 42 else when(prefs.getString("height","standard")) {"compact"->47;"tall"->65;else->56}
   keys.forEachIndexed { index,key ->
    val button=Button(this).apply {
     text=when(key) {
@@ -84,6 +114,37 @@ class DeckKeyboardService : InputMethodService() {
     minWidth=0; minimumWidth=0; minHeight=0; minimumHeight=0
     setPadding(0,0,0,0)
     setOnClickListener { if(key!="⌫" && key!="Space") press(key) }
+    val extras=when {
+     panel=="ABC" && key.length==1 && key[0] in 'q'..'p' && "qwertyuiop".contains(key) ->
+      listOf(("qwertyuiop".indexOf(key)+1)%10).map{if(it==0)"0" else it.toString()} + accents[key].orEmpty()
+     key=="." -> listOf(",","!","?","…")
+     panel=="ABC" -> accents[key].orEmpty()
+     else -> emptyList()
+    }
+    if(extras.isNotEmpty() && key!="Space" && key!="⌫") {
+     setOnTouchListener(object:View.OnTouchListener {
+      var opened=false
+      var chosen=0
+      var x0=0f
+      val hold=Runnable { opened=true; chosen=0; showChoices(this@DeckKeyboardService,button=this@apply,options=extras) }
+      override fun onTouch(v:View,event:MotionEvent):Boolean {
+       when(event.actionMasked) {
+        MotionEvent.ACTION_DOWN -> { opened=false;chosen=0;x0=event.x;handler.postDelayed(hold,370);v.isPressed=true;return true }
+        MotionEvent.ACTION_MOVE -> {
+         if(opened) {chosen=((event.x-x0)/32.dp).toInt().coerceIn(0,extras.lastIndex);updateChoice(extras,chosen)}
+         return true
+        }
+        MotionEvent.ACTION_UP -> {
+         handler.removeCallbacks(hold);v.isPressed=false
+         if(opened) {popup?.dismiss();popup=null;press(extras[chosen])} else press(key)
+         return true
+        }
+        MotionEvent.ACTION_CANCEL -> {handler.removeCallbacks(hold);popup?.dismiss();popup=null;v.isPressed=false;return true}
+       }
+       return true
+      }
+     })
+    }
     if(key=="⌫" || key=="Space") {
      setOnTouchListener(object:View.OnTouchListener {
       var startX=0f
@@ -116,6 +177,24 @@ class DeckKeyboardService : InputMethodService() {
   }
   root.addView(line)
  }
+ private fun showChoices(service:DeckKeyboardService,button:View,options:List<String>) {
+  popup?.dismiss()
+  val bar=LinearLayout(service).apply { orientation=LinearLayout.HORIZONTAL;setBackgroundColor(bg);setPadding(4.dp,4.dp,4.dp,4.dp) }
+  options.forEachIndexed { i,value ->
+   bar.addView(TextView(service).apply {
+    text=value;gravity=Gravity.CENTER;textSize=19f;setTextColor(Color.WHITE)
+    setBackgroundColor(if(i==0)accent else keyBg)
+   },LinearLayout.LayoutParams(36.dp,43.dp).apply {setMargins(1.dp,0,1.dp,0)})
+  }
+  popup=PopupWindow(bar,(options.size*38+8).dp,51.dp,false).apply {
+   isClippingEnabled=true
+   showAsDropDown(button,-((options.size-1)*18).dp,-(105.dp))
+  }
+ }
+ private fun updateChoice(options:List<String>,index:Int) {
+  val bar=popup?.contentView as? LinearLayout ?:return
+  for(i in 0 until bar.childCount) bar.getChildAt(i).setBackgroundColor(if(i==index)accent else keyBg)
+ }
  private val repeater=object:Runnable { override fun run() { if(repeatKey=="⌫") { erase(); handler.postDelayed(this,65) } } }
  private fun drawKeys() {
   if(!::root.isInitialized)return
@@ -129,8 +208,8 @@ class DeckKeyboardService : InputMethodService() {
    "ABC" -> {
     row("qwertyuiop".map{it.toString()})
     row("asdfghjkl".map{it.toString()})
-    row(listOf("Shift")+ "zxcvbnm".map{it.toString()} + listOf(".","⌫"))
-    row(listOf("123",",","Ctrl","Space","Enter"),listOf(1f,0.8f,1.2f,4.4f,1.2f))
+    row(listOf("Shift")+ "zxcvbnm".map{it.toString()} + "⌫",listOf(1.6f)+List(7){1f}+listOf(1.6f))
+    row(listOf("Ctrl","'","Space",".","Enter"),listOf(1.2f,0.8f,4.4f,0.8f,1.2f))
    }
    "SYM" -> { row(listOf("1","2","3","4","5","6","7","8","9","0"));row(listOf("!","@","#","$","%","^","&","*","(",")"));row(listOf("-","_","=","+","[","]","{","}","⌫"));row(listOf("ABC","/","\\","Space","?","Enter"),listOf(1f,1f,1f,4f,1f,1f)) }
    "NAV" -> { row(listOf("Home","↑","End","PgUp"));row(listOf("←","↓","→","PgDn"));row(listOf("Ins","Del","Tab","Esc"));row(listOf("ABC","Ctrl","Alt","Space","Enter"),listOf(1f,1f,1f,4f,1f)) }
@@ -139,7 +218,7 @@ class DeckKeyboardService : InputMethodService() {
   }
   // The bottom inset above reserves space for Android's keyboard switcher.
   // User clearance adds only optional extra breathing room.
-  val clearance=prefs.getInt("clearance",12)
+  val clearance=kotlin.math.max(0,prefs.getInt("clearance",12)-6)
   root.addView(View(this),LinearLayout.LayoutParams(-1,clearance.dp))
  }
  private fun beforeCursor()=currentInputConnection?.getTextBeforeCursor(100,0)?.toString().orEmpty()
@@ -232,7 +311,8 @@ class DeckKeyboardService : InputMethodService() {
     ic.deleteSurroundingText(1,0);ic.commitText(". ",1)
    } else ic.commitText(" ",1)
    lastSpace=now
-  } else if(key.length==1) {
+  } else if(key.length==1 || key=="…") {
+   if(key in listOf(".",",","!","?","…") && beforeCursor().endsWith(" ")) ic.deleteSurroundingText(1,0)
    val before=beforeCursor()
    val autoCap=autoCapital()
    val char=if(shift||caps||(prefs.getBoolean("autocap",true)&&autoCap)) key.uppercase(Locale.ENGLISH) else key
