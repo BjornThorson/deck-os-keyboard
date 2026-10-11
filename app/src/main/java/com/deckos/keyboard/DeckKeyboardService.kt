@@ -242,7 +242,12 @@ class DeckKeyboardService : InputMethodService() {
     row(listOf("Shift")+ "zxcvbnm".map{it.toString()} + "⌫",listOf(1.6f)+List(7){1f}+listOf(1.6f))
     row(listOf("Ctrl",",","Space",".","Enter"),listOf(1.2f,0.8f,4.4f,0.8f,1.2f))
    }
-   "SYM" -> { row(listOf("1","2","3","4","5","6","7","8","9","0"));row(listOf("!","@","#","$","%","^","&","*","(",")"));row(listOf("-","_","=","+","[","]","{","}","⌫"));row(listOf("ABC","/","\\","Space","?","Enter"),listOf(1f,1f,1f,4f,1f,1f)) }
+   "SYM" -> {
+    row(listOf("!","?","@", "#","$","%","^","&","*","~"))
+    row(listOf(":", ";","(",")","[","]","{","}","<",">"))
+    row(listOf("-","_","=","+","/","\\","|","`","\"","⌫"))
+    row(listOf("ABC",",","'","Space",".","Enter"),listOf(1f,1f,1f,4f,1f,1f))
+   }
    "NAV" -> { row(listOf("Home","↑","End","PgUp"));row(listOf("←","↓","→","PgDn"));row(listOf("Ins","Del","Tab","Esc"));row(listOf("ABC","Ctrl","Alt","Space","Enter"),listOf(1f,1f,1f,4f,1f)) }
    "FN" -> { row(listOf("F1","F2","F3","F4"));row(listOf("F5","F6","F7","F8"));row(listOf("F9","F10","F11","F12"));row(listOf("ABC","Ctrl","Alt","Space","Esc"),listOf(1f,1f,1f,4f,1f)) }
    "NUM" -> { row(listOf("7","8","9","/"));row(listOf("4","5","6","*"));row(listOf("1","2","3","-"));row(listOf("ABC","0",".","+","Enter")) }
