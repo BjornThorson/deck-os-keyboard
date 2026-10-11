@@ -269,6 +269,66 @@ class DeckKeyboardService : InputMethodService() {
    suggestions.addView(item,LinearLayout.LayoutParams(0,-1,1f))
   }
  }
+ private val keyboardRows=listOf("qwertyuiop","asdfghjkl","zxcvbnm")
+ private fun nearby(a:Char,b:Char):Boolean {
+  var ax=-1;var ay=-1;var bx=-1;var by=-1
+  keyboardRows.forEachIndexed { row,letters ->
+   val i=letters.indexOf(a);if(i>=0){ax=i;ay=row}
+   val j=letters.indexOf(b);if(j>=0){bx=j;by=row}
+  }
+  if(ax<0 || bx<0)return false
+  val offsets=listOf(0f,0.5f,1.5f)
+  return kotlin.math.abs((ax+offsets[ay])-(bx+offsets[by]))<=1.15f && kotlin.math.abs(ay-by)<=1
+ }
+ // Single typo only: substitution, insertion, deletion, or adjacent transposition.
+ // Returns a lower score for physically adjacent substitutions.
+ private fun typoCost(typed:String,target:String):Int {
+  if(kotlin.math.abs(typed.length-target.length)>1)return 99
+  if(typed.length==target.length) {
+   val wrong=typed.indices.filter{typed[it]!=target[it]}
+   if(wrong.size==1)return if(nearby(typed[wrong[0]],target[wrong[0]]))1 else 3
+   if(wrong.size==2 && wrong[1]==wrong[0]+1 &&
+      typed[wrong[0]]==target[wrong[1]] && typed[wrong[1]]==target[wrong[0]])return 1
+   return 99
+  }
+  val shorter=if(typed.length<target.length)typed else target
+  val longer=if(typed.length>target.length)typed else target
+  var i=0;var j=0;var skipped=false
+  while(i<shorter.length && j<longer.length) {
+   if(shorter[i]==longer[j]) {i++;j++}
+   else if(!skipped) {skipped=true;j++}
+   else return 99
+  }
+  return 2
+ }
+ private fun correctionFor(original:String):String? {
+  val typed=original.lowercase(Locale.ENGLISH)
+  if(typed.isEmpty())return null
+  val explicit=when(typed) {
+   "i"->"I";"im"->"I'm";"ive"->"I've";"ill"->"I'll"
+   else->commonTypos[typed]
+  }
+  if(explicit!=null)return explicit
+  val strength=prefs.getString("correction_strength","moderate") ?: "moderate"
+  if(strength=="off" || typed.length<3 || typed.length>18 || !typed.all{it in 'a'..'z'})return null
+  // Never rewrite an accepted dictionary word solely on spelling similarity.
+  if(typed in dictionary || typed in words)return null
+  val limit=when(strength) {"gentle"->1;"strong"->3;else->2}
+  var best:String?=null
+  var bestScore=Int.MAX_VALUE
+  // The dictionary is ordered by frequency. Rank by typo plausibility first,
+  // then frequency; no sorting or view rebuilding on the typing hot path.
+  dictionary.forEachIndexed { index,word ->
+   if(word.length in (typed.length-1)..(typed.length+1) && word.all{it in 'a'..'z'}) {
+    val cost=typoCost(typed,word)
+    if(cost<=3) {
+     val score=cost*100+index/150
+     if(score<bestScore) {bestScore=score;best=word}
+    }
+   }
+  }
+  return if(bestScore<=limit*100+30)best else null
+ }
  private fun replaceWord(word:String) {
   val ic=currentInputConnection ?:return
   val old=currentWord()
@@ -328,13 +388,7 @@ class DeckKeyboardService : InputMethodService() {
    val before=beforeCursor()
    val old=currentWord()
    val correction=if(!privateField && !terminalField && prefs.getBoolean("autocorrect",true))
-    when(old.lowercase(Locale.ENGLISH)) {
-     "i" -> "I"
-     "im" -> "I'm"
-     "ive" -> "I've"
-     "ill" -> "I'll"
-     else -> commonTypos[old.lowercase(Locale.ENGLISH)]
-    } else null
+    correctionFor(old) else null
    if(correction!=null && old.isNotEmpty()) {
     val corrected=if(old.first().isUpperCase()) correction.replaceFirstChar{it.uppercase()} else correction
     ic.deleteSurroundingText(old.length,0)

@@ -19,9 +19,21 @@ class SettingsActivity : Activity() {
    root.addView(Switch(this).apply { text=name; isChecked=prefs.getBoolean(key,default); setTextColor(-1); setOnCheckedChangeListener { _,on -> prefs.edit().putBoolean(key,on).apply() } })
   }
   toggle("Word suggestions","suggestions",true)
-  toggle("Autocorrect common typos","autocorrect",true)
+  toggle("Automatic spelling correction","autocorrect",true)
   toggle("Automatic sentence capitals","autocap",true)
   toggle("Double space for period","double_space",true)
+  root.addView(label("Autocorrect strength"))
+  val strengths=listOf("off","gentle","moderate","strong")
+  val correctionStrength=Spinner(this)
+  correctionStrength.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,strengths)
+  correctionStrength.setSelection(strengths.indexOf(prefs.getString("correction_strength","moderate")).coerceAtLeast(0))
+  correctionStrength.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener {
+   override fun onNothingSelected(parent:android.widget.AdapterView<*>?) {}
+   override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:android.view.View?,position:Int,id:Long) {
+    prefs.edit().putString("correction_strength",strengths[position]).apply()
+   }
+  }
+  root.addView(correctionStrength)
   root.addView(label("Keyboard height"))
   val heights=Spinner(this)
   heights.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,listOf("compact","standard","tall"))
