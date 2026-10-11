@@ -18,7 +18,7 @@ android {
    }
   }
  }
- defaultConfig { applicationId = "com.deckos.keyboard"; minSdk = 26; targetSdk = 35; versionCode = 10; versionName = "0.4.5" }
+ defaultConfig { applicationId = "com.deckos.keyboard"; minSdk = 26; targetSdk = 35; versionCode = 11; versionName = "0.4.5.1" }
  compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
  kotlinOptions { jvmTarget = "17" }
 }

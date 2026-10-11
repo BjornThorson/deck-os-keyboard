@@ -211,6 +211,14 @@ class DeckKeyboardService : InputMethodService() {
    suggestions.getChildAt(i).setBackgroundColor(if(i==index)accent else keyBg)
   }
  }
+ private val repeater=object:Runnable {
+  override fun run() {
+   if(repeatKey=="⌫") {
+    erase()
+    handler.postDelayed(this,65)
+   }
+  }
+ }
  private fun drawKeys() {
   if(!::root.isInitialized)return
   root.removeAllViews()
