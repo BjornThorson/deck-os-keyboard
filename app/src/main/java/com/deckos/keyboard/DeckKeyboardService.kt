@@ -73,26 +73,15 @@ class DeckKeyboardService : InputMethodService() {
   root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg); setPadding(2,4,2,0) }
   root.setOnApplyWindowInsetsListener { _,insets ->
    val bottom=insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
-   val safe=bottom.coerceAtMost(24.dp).coerceAtLeast(8.dp)
+   val safe=bottom.coerceAtLeast(40.dp)
    if(root.paddingBottom!=safe) root.setPadding(root.paddingLeft,root.paddingTop,root.paddingRight,safe)
    insets
   }
-  root.setPadding(root.paddingLeft,root.paddingTop,root.paddingRight,8.dp)
+  root.setPadding(root.paddingLeft,root.paddingTop,root.paddingRight,40.dp)
   drawKeys()
   return root
  }
  private val Int.dp get()=(this*resources.displayMetrics.density).toInt()
- private fun animateKey(button:Button,down:Boolean) {
-  button.animate().cancel()
-  button.animate().scaleX(if(down)1.065f else 1f).scaleY(if(down)1.09f else 1f)
-   .setDuration(if(down)65L else 95L).start()
-  if(down) {
-   button.setTag(android.R.id.custom,button.backgroundTintList)
-   button.backgroundTintList=android.content.res.ColorStateList.valueOf(Color.rgb(111,89,114))
-  } else {
-   button.backgroundTintList=button.getTag(android.R.id.custom) as? android.content.res.ColorStateList
-  }
- }
  private fun row(keys:List<String>,weights:List<Float>?=null) {
   val line=object:LinearLayout(this) {
    private var active:View?=null
@@ -100,7 +89,6 @@ class DeckKeyboardService : InputMethodService() {
     if(childCount==0)return super.dispatchTouchEvent(event)
     if(event.actionMasked==MotionEvent.ACTION_DOWN) {
      active=(0 until childCount).map{getChildAt(it)}.minByOrNull{ kotlin.math.abs(event.x-(it.left+it.right)/2f) }
-     (active as? Button)?.let { animateKey(it,true) }
     }
     val target=active
     if(target!=null) {
@@ -109,7 +97,6 @@ class DeckKeyboardService : InputMethodService() {
      val handled=target.dispatchTouchEvent(shifted)
      shifted.recycle()
      if(event.actionMasked==MotionEvent.ACTION_UP || event.actionMasked==MotionEvent.ACTION_CANCEL) {
-      (target as? Button)?.let { animateKey(it,false) }
       active=null
      }
      return handled
