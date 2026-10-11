@@ -33,6 +33,8 @@ class DeckKeyboardService : InputMethodService() {
   "z" to listOf("ž"),"d" to listOf("ð"),"t" to listOf("þ")
  )
  private var popup:PopupWindow?=null
+ private var popupLeft=0
+ private var popupCellWidth=0
  private val letterButtons=mutableListOf<Pair<String,Button>>()
  private var shiftButton:Button?=null
  private val handler=Handler(Looper.getMainLooper())
@@ -80,6 +82,17 @@ class DeckKeyboardService : InputMethodService() {
   return root
  }
  private val Int.dp get()=(this*resources.displayMetrics.density).toInt()
+ private fun animateKey(button:Button,down:Boolean) {
+  button.animate().cancel()
+  button.animate().scaleX(if(down)1.065f else 1f).scaleY(if(down)1.09f else 1f)
+   .setDuration(if(down)65L else 95L).start()
+  if(down) {
+   button.setTag(android.R.id.custom,button.backgroundTintList)
+   button.backgroundTintList=android.content.res.ColorStateList.valueOf(Color.rgb(111,89,114))
+  } else {
+   button.backgroundTintList=button.getTag(android.R.id.custom) as? android.content.res.ColorStateList
+  }
+ }
  private fun row(keys:List<String>,weights:List<Float>?=null) {
   val line=object:LinearLayout(this) {
    private var active:View?=null
@@ -87,6 +100,7 @@ class DeckKeyboardService : InputMethodService() {
     if(childCount==0)return super.dispatchTouchEvent(event)
     if(event.actionMasked==MotionEvent.ACTION_DOWN) {
      active=(0 until childCount).map{getChildAt(it)}.minByOrNull{ kotlin.math.abs(event.x-(it.left+it.right)/2f) }
+     (active as? Button)?.let { animateKey(it,true) }
     }
     val target=active
     if(target!=null) {
@@ -94,7 +108,10 @@ class DeckKeyboardService : InputMethodService() {
      shifted.offsetLocation(-target.left.toFloat(),-target.top.toFloat())
      val handled=target.dispatchTouchEvent(shifted)
      shifted.recycle()
-     if(event.actionMasked==MotionEvent.ACTION_UP || event.actionMasked==MotionEvent.ACTION_CANCEL) active=null
+     if(event.actionMasked==MotionEvent.ACTION_UP || event.actionMasked==MotionEvent.ACTION_CANCEL) {
+      (target as? Button)?.let { animateKey(it,false) }
+      active=null
+     }
      return handled
     }
     return super.dispatchTouchEvent(event)
@@ -119,7 +136,7 @@ class DeckKeyboardService : InputMethodService() {
     val extras=when {
      panel=="ABC" && key.length==1 && "qwertyuiop".contains(key) ->
       listOf(("qwertyuiop".indexOf(key)+1)%10).map{if(it==0)"0" else it.toString()} + accents[key].orEmpty()
-     key=="." -> listOf(",","!","?","…")
+     key=="." -> listOf("'","!","?","…")
      panel=="ABC" -> accents[key].orEmpty()
      else -> emptyList()
     }
@@ -127,13 +144,12 @@ class DeckKeyboardService : InputMethodService() {
      setOnTouchListener(object:View.OnTouchListener {
       var opened=false
       var chosen=0
-      var x0=0f
       val hold=Runnable { opened=true; chosen=0; showChoices(this@DeckKeyboardService,button=this@apply,options=extras) }
       override fun onTouch(v:View,event:MotionEvent):Boolean {
        when(event.actionMasked) {
-        MotionEvent.ACTION_DOWN -> { opened=false;chosen=0;x0=event.x;handler.postDelayed(hold,370);v.isPressed=true;return true }
+        MotionEvent.ACTION_DOWN -> { opened=false;chosen=0;handler.postDelayed(hold,370);v.isPressed=true;return true }
         MotionEvent.ACTION_MOVE -> {
-         if(opened) {chosen=((event.x-x0)/32.dp).toInt().coerceIn(0,extras.lastIndex);updateChoice(extras,chosen)}
+         if(opened) {chosen=((event.rawX-popupLeft)/popupCellWidth.coerceAtLeast(1)).toInt().coerceIn(0,extras.lastIndex);updateChoice(extras,chosen)}
          return true
         }
         MotionEvent.ACTION_UP -> {
@@ -183,16 +199,26 @@ class DeckKeyboardService : InputMethodService() {
  }
  private fun showChoices(service:DeckKeyboardService,button:View,options:List<String>) {
   popup?.dismiss()
-  val bar=LinearLayout(service).apply { orientation=LinearLayout.HORIZONTAL;setBackgroundColor(bg);setPadding(4.dp,4.dp,4.dp,4.dp) }
+  val screenWidth=resources.displayMetrics.widthPixels
+  val cell=(screenWidth/options.size).coerceAtMost(48.dp).coerceAtLeast(24.dp)
+  val width=cell*options.size
+  val loc=IntArray(2)
+  button.getLocationOnScreen(loc)
+  popupLeft=(loc[0]+button.width/2-width/2).coerceIn(0,(screenWidth-width).coerceAtLeast(0))
+  popupCellWidth=cell
+  val bar=LinearLayout(service).apply {
+   orientation=LinearLayout.HORIZONTAL
+   setBackgroundColor(bg)
+  }
   options.forEachIndexed { i,value ->
    bar.addView(TextView(service).apply {
     text=value;gravity=Gravity.CENTER;textSize=19f;setTextColor(Color.WHITE)
     setBackgroundColor(if(i==0)accent else keyBg)
-   },LinearLayout.LayoutParams(36.dp,43.dp).apply {setMargins(1.dp,0,1.dp,0)})
+   },LinearLayout.LayoutParams(cell,48.dp))
   }
-  popup=PopupWindow(bar,(options.size*38+8).dp,51.dp,false).apply {
-   isClippingEnabled=true
-   showAsDropDown(button,-((options.size-1)*18).dp,-(105.dp))
+  popup=PopupWindow(bar,width,48.dp,false).apply {
+   isClippingEnabled=false
+   showAtLocation(root,Gravity.TOP or Gravity.LEFT,popupLeft,(loc[1]-54.dp).coerceAtLeast(0))
   }
  }
  private fun updateChoice(options:List<String>,index:Int) {
@@ -214,7 +240,7 @@ class DeckKeyboardService : InputMethodService() {
     row("qwertyuiop".map{it.toString()})
     row("asdfghjkl".map{it.toString()})
     row(listOf("Shift")+ "zxcvbnm".map{it.toString()} + "⌫",listOf(1.6f)+List(7){1f}+listOf(1.6f))
-    row(listOf("Ctrl","'","Space",".","Enter"),listOf(1.2f,0.8f,4.4f,0.8f,1.2f))
+    row(listOf("Ctrl",",","Space",".","Enter"),listOf(1.2f,0.8f,4.4f,0.8f,1.2f))
    }
    "SYM" -> { row(listOf("1","2","3","4","5","6","7","8","9","0"));row(listOf("!","@","#","$","%","^","&","*","(",")"));row(listOf("-","_","=","+","[","]","{","}","⌫"));row(listOf("ABC","/","\\","Space","?","Enter"),listOf(1f,1f,1f,4f,1f,1f)) }
    "NAV" -> { row(listOf("Home","↑","End","PgUp"));row(listOf("←","↓","→","PgDn"));row(listOf("Ins","Del","Tab","Esc"));row(listOf("ABC","Ctrl","Alt","Space","Enter"),listOf(1f,1f,1f,4f,1f)) }
